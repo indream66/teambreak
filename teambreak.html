@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>團拆幫手 - 多功能隨機工具 (AI增強版)</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <!-- 引入 Tone.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <style>
+        /* 自定義字體 */
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f0f4f8; /* bg-slate-100 */
+        }
+        /* 骰子滾動動畫 */
+        .dice.rolling {
+            animation: roll 0.7s ease-in-out;
+        }
+        @keyframes roll {
+            0% { transform: rotate(0deg) scale(1); }
+            25% { transform: rotate(180deg) scale(1.2); }
+            50% { transform: rotate(360deg) scale(1); }
+            75% { transform: rotate(540deg) scale(1.2); }
+            100% { transform: rotate(720deg) scale(1); }
+        }
+        /* 結果彈出動畫 */
+        .result-item, .poe-result-text {
+            animation: pop-in 0.4s ease-out forwards;
+            opacity: 0;
+            transform: scale(0.8);
+        }
+        @keyframes pop-in {
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        /* 頁籤樣式 */
+        .tab-btn {
+            transition: all 0.3s ease;
+        }
+        .tab-btn.active {
+            background-color: #4f46e5; /* indigo-600 */
+            color: white;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        .copy-btn:active, #spin-button:active, .action-btn:active {
+            transform: scale(0.95);
+        }
+        /* 轉盤指針 */
+        #wheel-pointer {
+            width: 0;
+            height: 0;
+            border-left: 15px solid transparent;
+            border-right: 15px solid transparent;
+            border-top: 30px solid #ef4444; /* red-500 */
+            position: absolute;
+            top: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            transition: transform 0.3s ease;
+        }
+        /* 彈窗動畫 */
+        .modal-content {
+            animation: zoom-in 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        @keyframes zoom-in {
+            from { transform: scale(0.5); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        /* Loading Spinner */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 4px solid #4f46e5;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* 卡牌樣式 (用於新抽獎功能) */
+        .card-container { perspective: 1000px; }
+        .card {
+            width: 100%; height: 100%; position: relative;
+            transition: transform 0.6s; transform-style: preserve-3d;
+        }
+        .card.flipped { transform: rotateY(180deg); }
+        .card-face {
+            position: absolute; width: 100%; height: 100%;
+            -webkit-backface-visibility: hidden; backface-visibility: hidden;
+            display: flex; justify-content: center; align-items: center;
+            border-radius: 0.75rem; text-align: center; padding: 1rem;
+        }
+        .card-front { background: linear-gradient(135deg, #818cf8, #c084fc); color: white; cursor: pointer; }
+        .card-back { background-color: white; border: 2px solid #e5e7eb; transform: rotateY(180deg); }
+        .card-back.winner { background: linear-gradient(135deg, #fde047, #f97316); color: #422006; }
+
+        /* 擲筊動畫 */
+        .poe-block { transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1); }
+        .poe-block.casting { animation: cast 0.6s ease-out; }
+        @keyframes cast {
+            0% { transform: translateY(0) rotate(0); }
+            50% { transform: translateY(-80px) rotate(720deg); }
+            100% { transform: translateY(0) rotate(1440deg); }
+        }
+        /* 攝影機視窗 */
+        #camera-container {
+            min-width: 200px;
+            min-height: 150px;
+        }
+        #camera-header {
+            touch-action: none; 
+        }
+        /* 音效面板 */
+        #sfx-panel {
+            transition: all 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-2xl bg-white rounded-2xl shadow-xl p-6 md:p-8">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-4xl font-bold text-gray-800">團拆幫手</h1>
+            <button id="toggle-camera-btn" class="flex items-center bg-gray-200 text-gray-700 hover:bg-gray-300 px-4 py-2 rounded-lg transition action-btn text-sm">
+                <i id="camera-icon" class="ph ph-video-camera-slash mr-2"></i>
+                <span id="camera-btn-text">開啟鏡頭</span>
+            </button>
+        </div>
+
+        <!-- 頁籤控制 -->
+        <div class="flex justify-center border-b border-gray-200 mb-6 flex-wrap">
+            <button id="new-lottery-tab-btn" class="tab-btn text-base font-semibold py-3 px-4 md:px-6 rounded-t-lg -mb-px text-gray-500"><i class="ph ph-seal-question mr-2"></i>抽獎</button>
+            <button id="wheel-tab-btn" class="tab-btn text-base font-semibold py-3 px-4 md:px-6 rounded-t-lg -mb-px text-gray-500"><i class="ph ph-target mr-2"></i>幸運轉盤</button>
+            <button id="dice-tab-btn" class="tab-btn text-base font-semibold py-3 px-4 md:px-6 rounded-t-lg -mb-px text-gray-500"><i class="ph ph-dice-three mr-2"></i>擲骰子</button>
+            <button id="lottery-tab-btn" class="tab-btn text-base font-semibold py-3 px-4 md:px-6 rounded-t-lg -mb-px text-gray-500"><i class="ph ph-ticket mr-2"></i>摸彩</button>
+            <button id="order-tab-btn" class="tab-btn text-base font-semibold py-3 px-4 md:px-6 rounded-t-lg -mb-px text-gray-500"><i class="ph ph-list-numbers mr-2"></i>隨機順序</button>
+            <button id="recommend-tab-btn" class="tab-btn text-base font-semibold py-3 px-4 md:px-6 rounded-t-lg -mb-px text-gray-500"><i class="ph ph-trophy mr-2"></i>AI 球隊推薦</button>
+            <button id="poe-tab-btn" class="tab-btn text-base font-semibold py-3 px-4 md:px-6 rounded-t-lg -mb-px text-gray-500"><i class="ph ph-yin-yang mr-2"></i>線上擲筊</button>
+        </div>
+
+        <!-- 內容區域 -->
+        <div id="content-area">
+             <!-- 新抽獎工具 -->
+             <div id="new-lottery-tool" class="hidden">
+                <div id="new-lottery-setup">
+                   <div class="mb-4">
+                       <label for="new-lottery-prizes" class="block text-base font-medium text-gray-700">獎項 (一行一個)：</label>
+                       <textarea id="new-lottery-prizes" rows="6" class="w-full mt-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"></textarea>
+                   </div>
+                   <div class="mb-6">
+                       <label for="new-lottery-tickets" class="block text-base font-medium text-gray-700">簽數 (圖形總數量)：</label>
+                       <input type="number" id="new-lottery-tickets" value="10" min="1" max="100" class="w-full mt-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm">
+                   </div>
+                   <button id="start-new-lottery-btn" class="w-full bg-orange-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition text-lg action-btn"><i class="ph ph-package mr-2"></i>產生抽獎項目</button>
+                </div>
+                <div id="new-lottery-draw-area" class="hidden">
+                   <div class="flex justify-between items-center mb-4">
+                       <h3 class="text-lg font-semibold text-gray-800">請點擊圖形開獎：</h3>
+                       <button id="reset-new-lottery-btn" class="bg-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-300 transition action-btn text-sm"><i class="ph ph-arrow-counter-clockwise mr-1"></i>重新設定</button>
+                   </div>
+                   <div id="new-lottery-graphics-container" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-4 min-h-[100px]"></div>
+                </div>
+           </div>
+
+            <!-- 幸運轉盤工具 -->
+            <div id="wheel-tool" class="hidden">
+                <div id="wheel-container" class="relative flex justify-center items-center mb-4 w-full mx-auto cursor-pointer" style="max-width: 400px;" title="點擊轉盤開始">
+                    <canvas id="wheel-canvas" width="400" height="400"></canvas>
+                    <div id="wheel-pointer"></div>
+                </div>
+                 <div class="mb-4">
+                     <div class="flex justify-between items-center mb-2">
+                        <label for="wheel-item-list" class="block text-base font-medium text-gray-700">參加者清單：</label>
+                        <button id="clear-wheel" class="text-xs bg-gray-200 text-gray-700 hover:bg-gray-300 px-3 py-1 rounded-full transition action-btn">清除</button>
+                    </div>
+                    <textarea id="wheel-item-list" rows="6" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm" placeholder="請輸入參加者，一行一個..."></textarea>
+                </div>
+                 <div class="flex space-x-2 mb-4">
+                    <button id="import-nba-wheel" class="w-full text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-2 rounded-lg transition action-btn">匯入NBA隊伍</button>
+                 </div>
+                <button id="spin-button" class="w-full bg-rose-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-rose-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500 transition text-lg"><i class="ph ph-rocket-launch mr-2"></i>開始旋轉！</button>
+            </div>
+
+            <!-- 骰子工具 -->
+            <div id="dice-tool" class="hidden">
+                <div class="mb-6">
+                    <label for="dice-count" class="block text-base font-medium text-gray-700 mb-2">選擇骰子數量：</label>
+                    <input type="number" id="dice-count" value="1" min="1" max="12" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm">
+                </div>
+                <div id="dice-container" class="flex flex-wrap justify-center items-center gap-4 min-h-[120px] bg-gray-100 p-4 rounded-lg mb-6 cursor-pointer" title="點擊這裡擲骰子"></div>
+                <button id="roll-button" class="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-transform transform active:scale-95 text-lg"><i class="ph ph-dice-five mr-2"></i>擲骰子！</button>
+            </div>
+            
+            <!-- 摸彩工具 -->
+            <div id="lottery-tool" class="hidden">
+                <div id="lottery-setup">
+                    <div class="mb-4">
+                        <label for="lottery-participants" class="block text-base font-medium text-gray-700 mb-2">參加者名單 (一行一個)：</label>
+                        <textarea id="lottery-participants" rows="8" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"></textarea>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-base font-medium text-gray-700 mb-2">獎品與數量：</label>
+                        <div id="prize-list-container" class="space-y-2">
+                            </div>
+                        <button id="add-prize-btn" class="mt-2 text-indigo-600 hover:text-indigo-800 font-semibold text-sm"><i class="ph ph-plus-circle mr-1"></i>新增獎品</button>
+                    </div>
+                    <button id="start-lottery-btn" class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition text-lg action-btn"><i class="ph ph-confetti mr-2"></i>開始摸彩</button>
+                </div>
+                <div id="lottery-draw-area" class="hidden">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-semibold text-gray-800">剩餘參加人數: <span id="remaining-participants-count" class="text-indigo-600">0</span></h3>
+                        <button id="reset-lottery-btn" class="bg-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-300 transition action-btn text-sm"><i class="ph ph-arrow-counter-clockwise mr-1"></i>重新設定</button>
+                    </div>
+                    <div id="lottery-prizes-container" class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        </div>
+                    <div class="mt-4 p-4 bg-gray-100 rounded-lg">
+                        <h4 class="font-semibold text-gray-700 mb-2 text-base">得獎名單：</h4>
+                        <ul id="winners-list" class="list-disc list-inside space-y-1 text-gray-600 text-sm"></ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 隨機順序工具 -->
+            <div id="order-tool" class="hidden">
+                <div class="mb-2">
+                     <div class="flex justify-between items-center mb-2">
+                        <label for="order-item-list" class="block text-base font-medium text-gray-700">輸入清單：</label>
+                        <button id="clear-order" class="text-xs bg-gray-200 text-gray-700 hover:bg-gray-300 px-3 py-1 rounded-full transition action-btn">清除</button>
+                    </div>
+                    <textarea id="order-item-list" rows="8" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm" placeholder="點擊 ✨ AI 智慧填入，或手動輸入..."></textarea>
+                </div>
+                 <div class="flex space-x-2 mb-4">
+                    <button id="ai-fill-order" class="w-1/2 text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 px-3 py-2 rounded-lg transition action-btn">✨ AI 智慧填入</button>
+                    <button id="import-nba-order" class="w-1/2 text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-2 rounded-lg transition action-btn">匯入NBA隊伍</button>
+                 </div>
+                 <button id="shuffle-button" class="w-full bg-sky-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-sky-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 transition-transform transform active:scale-95 text-lg"><i class="ph ph-arrows-clockwise mr-2"></i>排序一次</button>
+                 <div class="mt-6">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-lg font-semibold text-gray-800">新順序：</h3>
+                        <div class="flex items-center space-x-3">
+                            <span class="text-gray-600 font-medium text-sm">次數: <span id="order-count" class="font-bold text-base text-indigo-600">0</span></span>
+                            <button id="reset-order-btn" class="text-xs bg-gray-200 text-gray-600 hover:bg-gray-300 px-3 py-1 rounded-full transition action-btn">重設</button>
+                            <button id="copy-order-btn" class="copy-btn hidden bg-gray-200 text-gray-600 px-3 py-1 rounded-lg hover:bg-gray-300 transition text-xs"><i class="ph ph-copy mr-1"></i>複製</button>
+                        </div>
+                    </div>
+                    <div id="order-results" class="p-4 bg-gray-100 rounded-lg min-h-[50px] text-gray-700 text-base">請先輸入清單並點擊按鈕。</div>
+                </div>
+            </div>
+            
+            <!-- AI 球隊推薦 -->
+            <div id="recommend-tool" class="hidden">
+                 <div class="mb-4 space-y-3">
+                    <div>
+                        <label class="block text-base font-medium text-gray-700 mb-2">選擇聯盟：</label>
+                        <div class="flex space-x-4" id="league-selector">
+                            <label class="flex items-center text-base"><input type="radio" name="league" value="NBA" class="form-radio h-5 w-5 text-indigo-600" checked><span class="ml-2 text-gray-700">NBA</span></label>
+                            <label class="flex items-center text-base"><input type="radio" name="league" value="MLB" class="form-radio h-5 w-5 text-indigo-600"><span class="ml-2 text-gray-700">MLB</span></label>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="flex items-center text-base">
+                            <input type="checkbox" id="rookie-potential-checkbox" class="form-checkbox h-5 w-5 text-teal-600 rounded">
+                            <span class="ml-2 text-gray-700 flex items-center"><i class="ph ph-rocket-launch text-teal-600 mr-1"></i>推薦潛力新秀隊伍</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="space-y-2">
+                    <button id="get-recommendation-button" class="w-full bg-teal-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-teal-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition text-lg action-btn"><i class="ph ph-robot mr-2"></i>取得 AI 推薦</button>
+                    <button id="get-next-recommendation-btn" class="hidden w-full bg-sky-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-sky-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 transition text-lg action-btn"><i class="ph ph-arrow-circle-right mr-2"></i>推薦下一個</button>
+                </div>
+                <div class="mt-6">
+                    <div id="recommendation-results-container" class="p-4 bg-gray-100 rounded-lg min-h-[200px] text-gray-700 text-base">
+                        <p class="text-gray-500">請選擇聯盟並點擊按鈕，讓 AI 為您推薦值得投資的球隊。</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 線上擲筊 -->
+            <div id="poe-tool" class="hidden text-center">
+                <div id="poe-container" class="flex justify-center items-center gap-8 my-8 min-h-[100px] cursor-pointer" title="點擊這裡擲筊"></div>
+                <div id="poe-result" class="min-h-[80px]">
+                    <p class="text-gray-500 text-base">心誠則靈，請點擊按鈕或上方圖示擲筊</p>
+                </div>
+                <button id="cast-poe-button" class="w-full max-w-sm mx-auto bg-red-700 text-white font-bold py-3 px-4 rounded-lg hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-700 transition text-lg action-btn"><i class="ph ph-yin-yang mr-2"></i>開始擲筊</button>
+            </div>
+
+        </div>
+    </div>
+
+    <div id="camera-container" class="hidden fixed bottom-4 right-4 w-64 h-48 bg-black rounded-lg shadow-2xl border-2 border-indigo-500 overflow-hidden resize z-50">
+        <div id="camera-header" class="h-8 bg-indigo-600 text-white flex items-center justify-between px-2 cursor-move text-sm">
+            <select id="camera-select" class="hidden bg-indigo-700 text-white border-none rounded-md text-xs p-1 focus:ring-0"></select>
+            <span id="camera-title" class="font-bold flex-grow text-center">攝影機畫面</span>
+            <button id="close-camera-btn" class="text-white hover:text-red-300 text-xl leading-none">&times;</button>
+        </div>
+        <video id="camera-feed" class="w-full h-full object-cover bg-black" autoplay playsinline></video>
+    </div>
+
+    <!-- 音效面板 -->
+    <div class="fixed bottom-4 left-4 z-50">
+        <div id="sfx-panel" class="hidden flex-col space-y-2 mb-2">
+            <button data-sfx="clear" class="sfx-btn bg-green-400 hover:bg-green-500 text-green-800 rounded-full p-3 shadow-lg action-btn" title="過關音效">
+                <i class="ph-fill ph-star text-2xl"></i>
+            </button>
+            <button data-sfx="fail" class="sfx-btn bg-red-400 hover:bg-red-500 text-red-800 rounded-full p-3 shadow-lg action-btn" title="失敗音效">
+                <i class="ph-fill ph-thumbs-down text-2xl"></i>
+            </button>
+        </div>
+        <button id="toggle-sfx-btn" class="bg-indigo-600 text-white rounded-full p-4 shadow-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 action-btn">
+            <i id="sfx-main-icon" class="ph-fill ph-speaker-high text-2xl"></i>
+        </button>
+    </div>
+
+    <div id="winner-modal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center hidden z-50 p-4">
+        <div class="modal-content bg-white p-8 rounded-2xl shadow-xl text-center max-w-sm w-full relative">
+            <canvas id="confetti-canvas" class="absolute top-0 left-0 w-full h-full pointer-events-none"></canvas>
+            <h2 id="winner-modal-title" class="text-xl font-bold mb-2 text-gray-500">恭喜中獎！</h2>
+            <p id="winner-modal-prize" class="text-lg font-semibold text-amber-600"></p>
+            <p id="winner-name" class="text-3xl font-bold text-indigo-600 my-4 break-words"></p>
+            <button id="close-modal-btn" class="mt-4 bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-700 transition text-sm">太棒了！</button>
+        </div>
+    </div>
+    
+    <div id="dice-total-modal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center hidden z-50 p-4">
+        <div class="modal-content bg-white p-8 rounded-2xl shadow-xl text-center max-w-xs w-full relative">
+            <h2 class="text-xl font-bold mb-2 text-gray-500">合計點數</h2>
+            <p id="dice-total-sum" class="text-5xl font-bold text-indigo-600 my-4"></p>
+            <button id="close-dice-total-modal-btn" class="mt-4 bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-700 transition text-sm">確認</button>
+        </div>
+    </div>
+
+    <div id="ai-prompt-modal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center hidden z-50 p-4">
+        <div class="modal-content bg-white p-8 rounded-2xl shadow-xl text-left max-w-md w-full relative">
+             <h2 id="ai-modal-title" class="text-xl font-bold mb-4 text-gray-800">✨ AI 智慧填入</h2>
+             <p id="ai-modal-description" class="text-gray-600 mb-4 text-sm">請輸入您想生成清單的主題，AI 將為您自動產生。</p>
+             <div id="ai-prompt-content">
+                <label for="ai-prompt-input" class="block text-base font-medium text-gray-700 mb-2">主題：</label>
+                <input type="text" id="ai-prompt-input" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition text-sm" placeholder="例如：台灣小吃、超級英雄、經典電影...">
+                <div id="ai-error-message" class="text-red-500 mt-2 text-xs"></div>
+                <div class="flex justify-end space-x-3 mt-6">
+                    <button id="cancel-ai-prompt" class="bg-gray-200 text-gray-700 font-bold py-2 px-6 rounded-lg hover:bg-gray-300 transition text-sm">取消</button>
+                    <button id="submit-ai-prompt" class="bg-purple-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-purple-700 transition text-sm">生成</button>
+                </div>
+             </div>
+             <div id="ai-loading-indicator" class="hidden flex flex-col items-center justify-center py-8">
+                <div class="loader"></div>
+                <p class="mt-4 text-gray-600 text-sm">AI 正在為您生成清單，請稍候...</p>
+             </div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- DOM 元素 ---
+        const tabs = {
+            newLottery: { btn: document.getElementById('new-lottery-tab-btn'), tool: document.getElementById('new-lottery-tool') },
+            wheel: { btn: document.getElementById('wheel-tab-btn'), tool: document.getElementById('wheel-tool') },
+            dice: { btn: document.getElementById('dice-tab-btn'), tool: document.getElementById('dice-tool') },
+            lottery: { btn: document.getElementById('lottery-tab-btn'), tool: document.getElementById('lottery-tool') },
+            order: { btn: document.getElementById('order-tab-btn'), tool: document.getElementById('order-tool') },
+            recommend: { btn: document.getElementById('recommend-tab-btn'), tool: document.getElementById('recommend-tool') },
+            poe: { btn: document.getElementById('poe-tab-btn'), tool: document.getElementById('poe-tool') }
+        };
+
+        // 新抽獎
+        const newLotterySetup = document.getElementById('new-lottery-setup');
+        const newLotteryDrawArea = document.getElementById('new-lottery-draw-area');
+        const newLotteryPrizes = document.getElementById('new-lottery-prizes');
+        const newLotteryTickets = document.getElementById('new-lottery-tickets');
+        const startNewLotteryBtn = document.getElementById('start-new-lottery-btn');
+        const resetNewLotteryBtn = document.getElementById('reset-new-lottery-btn');
+        const newLotteryGraphicsContainer = document.getElementById('new-lottery-graphics-container');
+        const NO_WIN_TEXT = "未中獎";
+
+        // 摸彩
+        const lotterySetup = document.getElementById('lottery-setup');
+        const lotteryDrawArea = document.getElementById('lottery-draw-area');
+        const lotteryParticipants = document.getElementById('lottery-participants');
+        const prizeListContainer = document.getElementById('prize-list-container');
+        const addPrizeBtn = document.getElementById('add-prize-btn');
+        const startLotteryBtn = document.getElementById('start-lottery-btn');
+        const resetLotteryBtn = document.getElementById('reset-lottery-btn');
+        const remainingParticipantsCount = document.getElementById('remaining-participants-count');
+        const lotteryPrizesContainer = document.getElementById('lottery-prizes-container');
+        const winnersList = document.getElementById('winners-list');
+        const winnerModalPrize = document.getElementById('winner-modal-prize');
+        const winnerModalTitle = document.getElementById('winner-modal-title');
+
+        // 攝影機
+        const toggleCameraBtn = document.getElementById('toggle-camera-btn');
+        const cameraIcon = document.getElementById('camera-icon');
+        const cameraBtnText = document.getElementById('camera-btn-text');
+        const cameraContainer = document.getElementById('camera-container');
+        const cameraHeader = document.getElementById('camera-header');
+        const cameraFeed = document.getElementById('camera-feed');
+        const closeCameraBtn = document.getElementById('close-camera-btn');
+        const cameraSelect = document.getElementById('camera-select');
+        const cameraTitle = document.getElementById('camera-title');
+        let cameraStream = null;
+
+        // 幸運轉盤
+        const wheelCanvas = document.getElementById('wheel-canvas');
+        const wheelContainer = document.getElementById('wheel-container');
+        const wheelItemList = document.getElementById('wheel-item-list');
+        const spinButton = document.getElementById('spin-button');
+        const winnerModal = document.getElementById('winner-modal');
+        const winnerNameEl = document.getElementById('winner-name');
+        const closeModalBtn = document.getElementById('close-modal-btn');
+        const confettiCanvas = document.getElementById('confetti-canvas');
+        const importNbaWheelBtn = document.getElementById('import-nba-wheel');
+        const clearWheelBtn = document.getElementById('clear-wheel');
+
+        // 骰子
+        const diceCountInput = document.getElementById('dice-count');
+        const diceContainer = document.getElementById('dice-container');
+        const rollButton = document.getElementById('roll-button');
+        const diceTotalModal = document.getElementById('dice-total-modal');
+        const diceTotalSumEl = document.getElementById('dice-total-sum');
+        const closeDiceTotalModalBtn = document.getElementById('close-dice-total-modal-btn');
+
+        // 隨機順序
+        const orderItemListTextarea = document.getElementById('order-item-list');
+        const shuffleButton = document.getElementById('shuffle-button');
+        const orderResultsDiv = document.getElementById('order-results');
+        const copyOrderBtn = document.getElementById('copy-order-btn');
+        const importNbaOrderBtn = document.getElementById('import-nba-order');
+        const orderCountSpan = document.getElementById('order-count');
+        const resetOrderBtn = document.getElementById('reset-order-btn');
+        const clearOrderBtn = document.getElementById('clear-order');
+        const aiFillOrderBtn = document.getElementById('ai-fill-order');
+        
+        // AI 球隊推薦
+        const getRecommendationButton = document.getElementById('get-recommendation-button');
+        const getNextRecommendationBtn = document.getElementById('get-next-recommendation-btn');
+        const recommendationResultsContainer = document.getElementById('recommendation-results-container');
+        const rookiePotentialCheckbox = document.getElementById('rookie-potential-checkbox');
+        const leagueSelector = document.querySelector('#league-selector');
+        let lastRecommendedTeam = '';
+
+        // 線上擲筊
+        const poeContainer = document.getElementById('poe-container');
+        const poeResult = document.getElementById('poe-result');
+        const castPoeButton = document.getElementById('cast-poe-button');
+
+        // AI 通用 Modal
+        const aiPromptModal = document.getElementById('ai-prompt-modal');
+        const aiModalTitle = document.getElementById('ai-modal-title');
+        const aiModalDescription = document.getElementById('ai-modal-description');
+        const aiPromptContent = document.getElementById('ai-prompt-content');
+        const aiLoadingIndicator = document.getElementById('ai-loading-indicator');
+        const aiPromptInput = document.getElementById('ai-prompt-input');
+        const cancelAiPromptBtn = document.getElementById('cancel-ai-prompt');
+        const submitAiPromptBtn = document.getElementById('submit-ai-prompt');
+        const aiErrorMessage = document.getElementById('ai-error-message');
+        let activeTextarea = null;
+        let aiPromptGenerator = null;
+
+        // 音效面板
+        const toggleSfxBtn = document.getElementById('toggle-sfx-btn');
+        const sfxPanel = document.getElementById('sfx-panel');
+        const sfxMainIcon = document.getElementById('sfx-main-icon');
+        const sfxButtons = document.querySelectorAll('.sfx-btn');
+        let audioStarted = false;
+
+        // --- 資料 & 狀態 ---
+        const nbaTeams = [ "亞特蘭大老鷹", "波士頓塞爾提克", "布魯克林籃網", "夏洛特黃蜂", "芝加哥公牛", "克里夫蘭騎士", "達拉斯獨行俠", "丹佛金塊", "底特律活塞", "金州勇士", "休士頓火箭", "印第安納溜馬", "洛杉磯快艇", "洛杉磯湖人", "曼菲斯灰熊", "邁阿密熱火", "密爾瓦基公鹿", "明尼蘇達灰狼", "紐奧良鵜鶘", "紐約尼克", "奧克拉荷馬雷霆", "奧蘭多魔術", "費城76人", "鳳凰城太陽", "波特蘭拓荒者", "沙加緬度國王", "聖安東尼奧馬刺", "多倫多暴龍", "猶他爵士", "華盛頓巫師" ];
+        let orderCount = 0;
+        let lotteryState = { participants: [], prizes: [] };
+
+        // --- 通用函數 ---
+        const shuffleArray = (array) => {
+            const newArr = [...array];
+            for (let i = newArr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
+            }
+            return newArr;
+        };
+
+        // --- 頁籤切換邏輯 ---
+        function switchTab(tabKey) {
+            Object.keys(tabs).forEach(key => {
+                if(tabs[key] && tabs[key].tool) {
+                    tabs[key].tool.classList.add('hidden');
+                    tabs[key].btn.classList.remove('active');
+                    tabs[key].btn.classList.add('text-gray-500');
+                }
+            });
+            if(tabs[tabKey] && tabs[tabKey].tool) {
+                tabs[tabKey].tool.classList.remove('hidden');
+                tabs[tabKey].btn.classList.add('active');
+                tabs[tabKey].btn.classList.remove('text-gray-500');
+            }
+        }
+
+        Object.keys(tabs).forEach(key => {
+            if(tabs[key] && tabs[key].btn) {
+                tabs[key].btn.addEventListener('click', () => switchTab(key));
+            }
+        });
+        
+        // --- 新抽獎邏輯 (重製版) ---
+        startNewLotteryBtn.addEventListener('click', () => {
+            const prizes = newLotteryPrizes.value.split('\n').map(p => p.trim()).filter(p => p !== '');
+            const totalTickets = parseInt(newLotteryTickets.value, 10);
+
+            if (prizes.length === 0) {
+                alert('請至少輸入一個獎項！');
+                return;
+            }
+            if (isNaN(totalTickets) || totalTickets <= 0) {
+                alert('請輸入有效的簽數！');
+                return;
+            }
+            if (prizes.length > totalTickets) {
+                alert('獎項數量不能大於總簽數！');
+                return;
+            }
+
+            const lotteryPool = [...prizes];
+            const emptySlots = totalTickets - prizes.length;
+            for (let i = 0; i < emptySlots; i++) {
+                lotteryPool.push(NO_WIN_TEXT);
+            }
+
+            const shuffledPool = shuffleArray(lotteryPool);
+            
+            newLotteryGraphicsContainer.innerHTML = '';
+            shuffledPool.forEach(result => {
+                const cardContainer = document.createElement('div');
+                cardContainer.className = 'card-container aspect-square';
+                const card = document.createElement('div');
+                card.className = 'card';
+                
+                const frontFace = document.createElement('div');
+                frontFace.className = 'card-face card-front';
+                frontFace.innerHTML = `<i class="ph-fill ph-question text-3xl"></i>`;
+                
+                const backFace = document.createElement('div');
+                backFace.className = 'card-face card-back';
+                if (result !== NO_WIN_TEXT) {
+                    backFace.classList.add('winner');
+                    backFace.innerHTML = `<span class="font-bold text-base">${result}</span>`;
+                } else {
+                    backFace.innerHTML = `<span class="text-gray-500 text-base">${result}</span>`;
+                }
+                
+                card.appendChild(frontFace);
+                card.appendChild(backFace);
+                cardContainer.appendChild(card);
+                newLotteryGraphicsContainer.appendChild(cardContainer);
+
+                card.addEventListener('click', () => {
+                    if (!card.classList.contains('flipped')) {
+                        card.classList.add('flipped');
+                    }
+                }, { once: true }); 
+            });
+
+            newLotterySetup.classList.add('hidden');
+            newLotteryDrawArea.classList.remove('hidden');
+        });
+
+        resetNewLotteryBtn.addEventListener('click', () => {
+            newLotterySetup.classList.remove('hidden');
+            newLotteryDrawArea.classList.add('hidden');
+            newLotteryGraphicsContainer.innerHTML = '';
+            newLotteryPrizes.value = '';
+            newLotteryTickets.value = '10';
+        });
+
+        // --- 摸彩邏輯 ---
+        function addPrizeRow() {
+            const prizeRow = document.createElement('div');
+            prizeRow.className = 'flex items-center space-x-2';
+            prizeRow.innerHTML = `
+                <input type="text" class="lottery-prize-name w-2/3 p-2 border border-gray-300 rounded-lg text-sm" placeholder="獎品名稱">
+                <input type="number" class="lottery-prize-quantity w-1/3 p-2 border border-gray-300 rounded-lg text-sm" placeholder="数量" value="1" min="1">
+                <button class="remove-prize-btn text-red-500 hover:text-red-700 p-1"><i class="ph ph-trash"></i></button>
+            `;
+            prizeListContainer.appendChild(prizeRow);
+            prizeRow.querySelector('.remove-prize-btn').addEventListener('click', () => prizeRow.remove());
+        }
+        addPrizeBtn.addEventListener('click', addPrizeRow);
+
+        startLotteryBtn.addEventListener('click', () => {
+            const participants = lotteryParticipants.value.split('\n').map(p => p.trim()).filter(p => p);
+            if (participants.length === 0) {
+                alert('請至少輸入一位參加者！');
+                return;
+            }
+            const prizeRows = prizeListContainer.querySelectorAll('.flex');
+            const prizes = Array.from(prizeRows).map(row => ({
+                name: row.querySelector('.lottery-prize-name').value.trim(),
+                quantity: parseInt(row.querySelector('.lottery-prize-quantity').value, 10) || 0
+            })).filter(p => p.name && p.quantity > 0);
+
+            if (prizes.length === 0) {
+                alert('請至少設定一個有效的獎品！');
+                return;
+            }
+
+            lotteryState.participants = [...participants];
+            lotteryState.prizes = prizes;
+            
+            lotterySetup.classList.add('hidden');
+            lotteryDrawArea.classList.remove('hidden');
+            winnersList.innerHTML = '';
+            updateLotteryDrawUI();
+        });
+
+        function updateLotteryDrawUI() {
+            remainingParticipantsCount.textContent = lotteryState.participants.length;
+            lotteryPrizesContainer.innerHTML = '';
+            lotteryState.prizes.forEach((prize, index) => {
+                const prizeButton = document.createElement('button');
+                prizeButton.className = 'p-4 rounded-lg text-white font-bold text-center action-btn transition';
+                if (prize.quantity > 0 && lotteryState.participants.length > 0) {
+                    prizeButton.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                } else {
+                    prizeButton.classList.add('bg-gray-400', 'cursor-not-allowed');
+                    prizeButton.disabled = true;
+                }
+                prizeButton.innerHTML = `
+                    <p class="text-base">${prize.name}</p>
+                    <p class="text-xs">(剩餘: <span id="prize-qty-${index}">${prize.quantity}</span>)</p>
+                `;
+                prizeButton.addEventListener('click', () => drawLotteryWinner(index));
+                lotteryPrizesContainer.appendChild(prizeButton);
+            });
+        }
+
+        function drawLotteryWinner(prizeIndex) {
+            const winnerIndex = Math.floor(Math.random() * lotteryState.participants.length);
+            const winner = lotteryState.participants[winnerIndex];
+            const prize = lotteryState.prizes[prizeIndex];
+
+            lotteryState.participants.splice(winnerIndex, 1);
+            prize.quantity--;
+
+            const winnerLi = document.createElement('li');
+            winnerLi.textContent = `${winner} - ${prize.name}`;
+            winnersList.appendChild(winnerLi);
+            updateLotteryDrawUI();
+            
+            winnerModalTitle.textContent = "恭喜中獎！";
+            winnerModalPrize.textContent = `獲得：${prize.name}`;
+            winnerNameEl.textContent = winner;
+            winnerModal.classList.remove('hidden');
+            launchConfetti();
+        }
+
+        resetLotteryBtn.addEventListener('click', () => {
+            lotterySetup.classList.remove('hidden');
+            lotteryDrawArea.classList.add('hidden');
+            lotteryState = { participants: [], prizes: [] };
+        });
+
+        // --- 幸運轉盤邏輯 ---
+        const wheelCtx = wheelCanvas.getContext('2d');
+        const wheelColors = ["#6366F1", "#EC4899", "#22C55E", "#F97316", "#3B82F6", "#8B5CF6", "#14B8A6", "#EAB308", "#D946EF", "#EF4444"];
+        let wheelItems = [];
+        let currentAngle = 0;
+        let isSpinning = false;
+        function drawWheel() {
+            const numItems = wheelItems.length;
+            const arcSize = 2 * Math.PI / (numItems || 1);
+            const centerX = wheelCanvas.width / 2, centerY = wheelCanvas.height / 2;
+            const radius = wheelCanvas.width / 2 - 10;
+            wheelCtx.clearRect(0, 0, wheelCanvas.width, wheelCanvas.height);
+            wheelCtx.save();
+            wheelCtx.translate(centerX, centerY); wheelCtx.rotate(currentAngle); wheelCtx.translate(-centerX, -centerY);
+            for (let i = 0; i < numItems; i++) {
+                const angle = i * arcSize;
+                wheelCtx.beginPath();
+                wheelCtx.fillStyle = wheelColors[i % wheelColors.length];
+                wheelCtx.moveTo(centerX, centerY);
+                wheelCtx.arc(centerX, centerY, radius, angle, angle + arcSize);
+                wheelCtx.closePath(); wheelCtx.fill();
+                wheelCtx.save();
+                wheelCtx.translate(centerX, centerY); wheelCtx.rotate(angle + arcSize / 2);
+                wheelCtx.textAlign = "center"; wheelCtx.fillStyle = "#fff"; wheelCtx.font = "bold 14px 'Noto Sans TC'";
+                wheelCtx.fillText(wheelItems[i], radius * 0.65, 5);
+                wheelCtx.restore();
+            }
+            wheelCtx.restore();
+        }
+        function spinWheel() {
+            if (isSpinning) return;
+            wheelItems = wheelItemList.value.split('\n').map(item => item.trim()).filter(item => item !== '');
+            if (wheelItems.length < 2) { alert('請至少輸入兩個參加者！'); return; }
+            isSpinning = true;
+            spinButton.disabled = true; spinButton.classList.add('opacity-50', 'cursor-not-allowed');
+            const spinDuration = 5000;
+            const targetItemIndex = Math.floor(Math.random() * wheelItems.length);
+            const arcSize = 2 * Math.PI / wheelItems.length;
+            const pointerAngle = -0.5 * Math.PI;
+            const winningSegmentMiddleAngle = (targetItemIndex + 0.5) * arcSize;
+            const finalAngleOffset = pointerAngle - winningSegmentMiddleAngle;
+            const totalRotation = (10 * 2 * Math.PI) + finalAngleOffset;
+            let startTime = null;
+            function animateSpin(timestamp) {
+                if (!startTime) startTime = timestamp;
+                const elapsedTime = timestamp - startTime;
+                const easeOutCubic = t => 1 - Math.pow(1 - t, 4);
+                const progress = Math.min(elapsedTime / spinDuration, 1);
+                const easedProgress = easeOutCubic(progress);
+                currentAngle = easedProgress * totalRotation;
+                drawWheel();
+                if (progress < 1) {
+                    requestAnimationFrame(animateSpin);
+                } else {
+                    currentAngle = totalRotation; drawWheel();
+                    isSpinning = false;
+                    spinButton.disabled = false; spinButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                    showWinner(wheelItems[targetItemIndex]);
+                }
+            }
+            requestAnimationFrame(animateSpin);
+        }
+        function showWinner(winner) {
+            winnerModalTitle.textContent = "恭喜中獎！";
+            winnerModalPrize.textContent = "";
+            winnerNameEl.textContent = winner;
+            winnerModal.classList.remove('hidden');
+            launchConfetti();
+        }
+        wheelItemList.addEventListener('input', () => {
+             wheelItems = wheelItemList.value.split('\n').map(item => item.trim()).filter(item => item !== '');
+             currentAngle = 0; drawWheel();
+        });
+        spinButton.addEventListener('click', spinWheel);
+        wheelContainer.addEventListener('click', spinWheel);
+        closeModalBtn.addEventListener('click', () => winnerModal.classList.add('hidden'));
+
+        // --- 五彩紙屑動畫 ---
+        const confettiCtx = confettiCanvas.getContext('2d');
+        let confettiParticles = [];
+        function launchConfetti() {
+            confettiCanvas.width = confettiCanvas.offsetWidth; confettiCanvas.height = confettiCanvas.offsetHeight;
+            confettiParticles = [];
+            for (let i = 0; i < 100; i++) {
+                confettiParticles.push({ x: confettiCanvas.width / 2, y: confettiCanvas.height, size: Math.random() * 5 + 2, color: wheelColors[Math.floor(Math.random() * wheelColors.length)], vx: (Math.random() - 0.5) * 20, vy: Math.random() * -20 - 15, opacity: 1, });
+            }
+            animateConfetti();
+        }
+        function animateConfetti() {
+            confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+            confettiParticles.forEach((p, i) => {
+                p.vy += 0.8; p.x += p.vx; p.y += p.vy; p.opacity -= 0.01;
+                if (p.opacity <= 0) {
+                    confettiParticles.splice(i, 1);
+                } else {
+                    confettiCtx.globalAlpha = p.opacity; confettiCtx.fillStyle = p.color;
+                    confettiCtx.beginPath(); confettiCtx.rect(p.x, p.y, p.size, p.size); confettiCtx.fill();
+                }
+            });
+            if (confettiParticles.length > 0) requestAnimationFrame(animateConfetti);
+            else confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+        }
+
+        // --- 複製到剪貼簿 ---
+        function copyToClipboard(text, buttonElement) {
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(() => showCopySuccess(buttonElement));
+            } else {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed'; textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                try { document.execCommand('copy'); showCopySuccess(buttonElement); } catch (err) { alert('複製失敗！'); }
+                document.body.removeChild(textarea);
+            }
+        }
+        function showCopySuccess(buttonElement) {
+            const originalContent = buttonElement.innerHTML;
+            buttonElement.innerHTML = '<i class="ph ph-check mr-1"></i>已複製！';
+            buttonElement.disabled = true;
+            setTimeout(() => { buttonElement.innerHTML = originalContent; buttonElement.disabled = false; }, 2000);
+        }
+
+        // --- 骰子工具邏輯 ---
+        function getDiceFaceSVG(number) {
+            const dotPositions = { 1: [[50, 50]], 2: [[25, 25], [75, 75]], 3: [[25, 25], [50, 50], [75, 75]], 4: [[25, 25], [25, 75], [75, 25], [75, 75]], 5: [[25, 25], [25, 75], [50, 50], [75, 25], [75, 75]], 6: [[25, 25], [25, 50], [25, 75], [75, 25], [75, 50], [75, 75]], };
+            const dots = dotPositions[number].map(pos => `<circle cx="${pos[0]}" cy="${pos[1]}" r="8" fill="currentColor" />`).join('');
+            return `<svg viewBox="0 0 100 100" class="w-20 h-20 text-indigo-500"><rect x="5" y="5" width="90" height="90" rx="15" fill="white" stroke="currentColor" stroke-width="3" />${dots}</svg>`;
+        }
+        function updateDiceDisplay() {
+            const count = parseInt(diceCountInput.value, 10);
+            diceContainer.innerHTML = '';
+            for (let i = 0; i < count; i++) {
+                const diceWrapper = document.createElement('div');
+                diceWrapper.classList.add('dice');
+                diceWrapper.innerHTML = getDiceFaceSVG(Math.floor(Math.random() * 6) + 1);
+                diceContainer.appendChild(diceWrapper);
+            }
+        }
+        function rollDice() {
+            const diceElements = diceContainer.querySelectorAll('.dice');
+            if (diceElements.length === 0 || rollButton.disabled) return;
+            rollButton.disabled = true; rollButton.classList.add('opacity-50', 'cursor-not-allowed');
+            diceElements.forEach(dice => dice.classList.add('rolling'));
+            
+            let totalSum = 0;
+
+            setTimeout(() => {
+                diceElements.forEach(dice => {
+                    const result = Math.floor(Math.random() * 6) + 1;
+                    totalSum += result;
+                    dice.classList.remove('rolling');
+                    dice.innerHTML = getDiceFaceSVG(result);
+                });
+                rollButton.disabled = false; rollButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                
+                diceTotalSumEl.textContent = totalSum;
+                diceTotalModal.classList.remove('hidden');
+            }, 700);
+        }
+        diceCountInput.addEventListener('change', updateDiceDisplay);
+        rollButton.addEventListener('click', rollDice);
+        diceContainer.addEventListener('click', rollDice);
+        closeDiceTotalModalBtn.addEventListener('click', () => diceTotalModal.classList.add('hidden'));
+        
+        // --- 隨機順序工具邏輯 ---
+        function shuffleOrder() {
+            const items = orderItemListTextarea.value.split('\n').map(item => item.trim()).filter(item => item !== '');
+            if (items.length < 2) { orderResultsDiv.innerHTML = '<p class="text-red-500">請至少輸入兩個項目才能排序！</p>'; return; }
+            orderCount++; orderCountSpan.textContent = orderCount;
+            const currentList = shuffleArray(items);
+            orderResultsDiv.innerHTML = '';
+            const resultList = document.createElement('ul'); // Changed from ol to ul
+            resultList.className = 'space-y-2'; // Removed list-decimal and list-inside
+            currentList.forEach((item) => {
+                const li = document.createElement('li'); li.textContent = item;
+                li.className = 'result-item';
+                resultList.appendChild(li);
+            });
+            orderResultsDiv.appendChild(resultList);
+            copyOrderBtn.classList.remove('hidden');
+        }
+        shuffleButton.addEventListener('click', shuffleOrder);
+        resetOrderBtn.addEventListener('click', () => {
+            orderCount = 0; orderCountSpan.textContent = orderCount;
+            orderResultsDiv.innerHTML = '請先輸入清單並點擊按鈕。';
+            copyOrderBtn.classList.add('hidden');
+        });
+
+        // --- 匯入 & 清單管理按鈕 ---
+        importNbaWheelBtn.addEventListener('click', () => { wheelItemList.value = nbaTeams.join('\n'); wheelItemList.dispatchEvent(new Event('input')); });
+        clearWheelBtn.addEventListener('click', () => { wheelItemList.value = ''; wheelItemList.dispatchEvent(new Event('input')); });
+        importNbaOrderBtn.addEventListener('click', () => { orderItemListTextarea.value = nbaTeams.join('\n'); resetOrderBtn.click(); });
+        clearOrderBtn.addEventListener('click', () => { orderItemListTextarea.value = ''; resetOrderBtn.click(); });
+        copyOrderBtn.addEventListener('click', () => {
+            const items = Array.from(orderResultsDiv.querySelectorAll('li')).map(li => li.textContent);
+            if (items.length > 0) copyToClipboard(items.join('\n'), copyOrderBtn);
+        });
+        
+        // --- AI 功能邏輯 ---
+        async function callGeminiAPI(prompt, schema) {
+            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json", responseSchema: schema } };
+            const apiKey = ""; // Provided by environment
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!response.ok) { const errorBody = await response.text(); console.error("API Error Body:", errorBody); throw new Error(`API 請求失敗，狀態碼：${response.status}`); }
+            const result = await response.json();
+            if (result.candidates && result.candidates[0]?.content?.parts?.[0]?.text) { return JSON.parse(result.candidates[0].content.parts[0].text); } 
+            else { console.error("Unexpected API response structure:", result); throw new Error('從 API 收到的回應格式不正確。'); }
+        }
+
+        // AI 清單填入 (通用)
+        function openAiModal(config) {
+            activeTextarea = config.textarea;
+            aiPromptGenerator = config.promptGenerator;
+            aiModalTitle.textContent = config.title;
+            aiModalDescription.textContent = config.description;
+            aiPromptInput.placeholder = config.placeholder;
+            aiPromptModal.classList.remove('hidden');
+            aiPromptInput.value = ''; aiErrorMessage.textContent = '';
+            aiPromptContent.classList.remove('hidden');
+            aiLoadingIndicator.classList.add('hidden');
+            aiPromptInput.focus();
+        }
+        aiFillOrderBtn.addEventListener('click', () => openAiModal({ textarea: orderItemListTextarea, title: '✨ AI 智慧填入', description: '請輸入您想生成清單的主題，AI 將為您自動產生。', placeholder: '例如：台灣小吃、超級英雄、經典電影...', promptGenerator: (prompt) => `請根據這個主題「${prompt}」，生成一個包含10到20個項目的清單。` }));
+        cancelAiPromptBtn.addEventListener('click', () => aiPromptModal.classList.add('hidden'));
+        submitAiPromptBtn.addEventListener('click', async () => {
+            const promptText = aiPromptInput.value.trim();
+            if (!promptText) { aiErrorMessage.textContent = '請輸入一個主題！'; return; }
+            aiErrorMessage.textContent = '';
+            aiPromptContent.classList.add('hidden'); aiLoadingIndicator.classList.remove('hidden');
+            try {
+                const fullPrompt = aiPromptGenerator(promptText);
+                const schema = { type: "ARRAY", items: { "type": "STRING" } };
+                const generatedList = await callGeminiAPI(fullPrompt, schema);
+                if (activeTextarea && Array.isArray(generatedList)) {
+                    activeTextarea.value = generatedList.join('\n');
+                    if (activeTextarea === orderItemListTextarea) resetOrderBtn.click();
+                }
+                aiPromptModal.classList.add('hidden');
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                aiErrorMessage.textContent = `生成失敗：${error.message}`;
+                aiPromptContent.classList.remove('hidden'); aiLoadingIndicator.classList.add('hidden');
+            }
+        });
+
+        // AI 球隊推薦
+        const recommendTeam = async () => {
+             const selectedLeague = document.querySelector('input[name="league"]:checked').value;
+            const isRookiePotential = rookiePotentialCheckbox.checked;
+            recommendationResultsContainer.innerHTML = '<div class="flex justify-center items-center h-full"><div class="loader"></div></div>';
+            try {
+                let prompt = isRookiePotential
+                    ? `作為一個專業的球員卡分析師，請基於目前的球員表現、新人潛力、球隊人氣和卡牌市場價值，推薦一支**非頂級強隊，但擁有極具潛力新秀**的 ${selectedLeague} 球隊。`
+                    : `作為一個專業的球員卡分析師，請基於目前的球員表現、新人潛力、球隊人氣和卡牌市場價值，推薦一支最值得在團拆中跟團的 ${selectedLeague} 球隊。`;
+                
+                if (lastRecommendedTeam) {
+                    prompt += ` 這個推薦必須與「${lastRecommendedTeam}」不同。`;
+                }
+                prompt += `請提供球隊名稱和詳細的推薦理由。`;
+
+                const schema = { type: "OBJECT", properties: { "teamName": { "type": "STRING" }, "reason": { "type": "STRING" } }, required: ["teamName", "reason"] };
+                const result = await callGeminiAPI(prompt, schema);
+                if (result.teamName && result.reason) {
+                    recommendationResultsContainer.innerHTML = `<h4 class="text-xl font-bold text-indigo-600 mb-2">${result.teamName}</h4><p class="text-gray-700 whitespace-pre-wrap text-sm">${result.reason}</p>`;
+                    lastRecommendedTeam = result.teamName;
+                    getNextRecommendationBtn.classList.remove('hidden');
+                } else { throw new Error('AI 回應的資料格式不符預期。'); }
+            } catch (error) {
+                console.error("Team Recommendation Error:", error);
+                recommendationResultsContainer.innerHTML = `<p class="text-red-500">推薦生成失敗：${error.message}</p>`;
+                getNextRecommendationBtn.classList.add('hidden');
+            }
+        };
+        
+        getRecommendationButton.addEventListener('click', () => {
+            lastRecommendedTeam = ''; 
+            recommendTeam();
+        });
+        getNextRecommendationBtn.addEventListener('click', recommendTeam);
+        
+        leagueSelector.addEventListener('change', () => getNextRecommendationBtn.classList.add('hidden'));
+        rookiePotentialCheckbox.addEventListener('change', () => getNextRecommendationBtn.classList.add('hidden'));
+
+        // 線上擲筊
+        const poeSVG = {
+            up: `<svg width="80" height="40" viewBox="0 0 100 50" class="poe-block"><path d="M 10 45 C 10 20, 90 20, 90 45 L 10 45 Z" fill="#c00" stroke="#800" stroke-width="3"/><path d="M 10 45 Q 50 5, 90 45" fill="none" stroke="#800" stroke-width="3"/></svg>`,
+            down: `<svg width="80" height="40" viewBox="0 0 100 50" class="poe-block"><path d="M 10 5 C 10 30, 90 30, 90 5 L 10 5 Z" fill="#c00" stroke="#800" stroke-width="3"/></svg>`
+        };
+        function initPoeBlocks() {
+            poeContainer.innerHTML = poeSVG.up + poeSVG.down;
+        }
+        function castPoe() {
+            if (castPoeButton.disabled) return;
+            castPoeButton.disabled = true;
+            poeResult.innerHTML = '';
+            const blocks = poeContainer.querySelectorAll('.poe-block');
+            blocks.forEach(b => b.classList.add('casting'));
+            
+            setTimeout(() => {
+                const res1 = Math.random() > 0.5; 
+                const res2 = Math.random() > 0.5;
+                blocks[0].classList.remove('casting');
+                blocks[1].classList.remove('casting');
+                blocks[0].outerHTML = res1 ? poeSVG.up : poeSVG.down;
+                blocks[1].outerHTML = res2 ? poeSVG.up : poeSVG.down;
+                
+                let resultText = '';
+                if (res1 !== res2) {
+                    resultText = `<h4 class="text-2xl font-bold text-green-600">聖筊 (Shèng Jiǎo)</h4><p class="text-gray-600 mt-1 text-sm">表示神明允許、同意或行得通。</p>`;
+                } else if (res1 && res2) {
+                    resultText = `<h4 class="text-2xl font-bold text-yellow-600">笑筊 (Xiào Jiǎo)</h4><p class="text-gray-600 mt-1 text-sm">表示陳述不清、神明主意未定或說得不夠清楚。</p>`;
+                } else {
+                    resultText = `<h4 class="text-2xl font-bold text-red-700">陰筊 (Yīn Jiǎo)</h4><p class="text-gray-600 mt-1 text-sm">表示神明否定、憤怒或不行。</p>`;
+                }
+                poeResult.innerHTML = `<div class="poe-result-text">${resultText}</div>`;
+                castPoeButton.disabled = false;
+            }, 600);
+        }
+        castPoeButton.addEventListener('click', castPoe);
+        poeContainer.addEventListener('click', castPoe);
+
+        // --- 攝影機邏輯 ---
+        const startCamera = async (deviceId) => {
+            if (cameraStream) {
+                stopCamera();
+            }
+            const constraints = {
+                video: {
+                    deviceId: deviceId ? { exact: deviceId } : undefined
+                }
+            };
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+                cameraFeed.srcObject = cameraStream;
+                cameraContainer.classList.remove('hidden');
+                cameraIcon.className = "ph ph-video-camera mr-2";
+                cameraBtnText.textContent = "關閉鏡頭";
+                await populateCameraList();
+            } catch (err) {
+                alert("無法取得攝影機權限，請檢查您的設定。");
+                console.error("Error accessing camera: ", err);
+            }
+        };
+
+        const populateCameraList = async () => {
+            try {
+                if (!navigator.mediaDevices?.enumerateDevices) {
+                    console.log("enumerateDevices() not supported.");
+                    return;
+                }
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                cameraSelect.innerHTML = '';
+                videoDevices.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.textContent = device.label || `攝影機 ${cameraSelect.length + 1}`;
+                    cameraSelect.appendChild(option);
+                });
+                
+                if (videoDevices.length > 1) {
+                    cameraSelect.classList.remove('hidden');
+                    cameraTitle.classList.add('hidden');
+                } else {
+                    cameraSelect.classList.add('hidden');
+                    cameraTitle.classList.remove('hidden');
+                }
+
+                if (cameraStream) {
+                    const currentDeviceId = cameraStream.getVideoTracks()[0].getSettings().deviceId;
+                    cameraSelect.value = currentDeviceId;
+                }
+            } catch (err) {
+                console.error("無法列舉攝影機: ", err);
+            }
+        };
+
+        const stopCamera = () => {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+                cameraFeed.srcObject = null;
+                cameraStream = null;
+                cameraContainer.classList.add('hidden');
+                cameraIcon.className = "ph ph-video-camera-slash mr-2";
+                cameraBtnText.textContent = "開啟鏡頭";
+            }
+        };
+
+        toggleCameraBtn.addEventListener('click', () => {
+            if (cameraStream) {
+                stopCamera();
+            } else {
+                startCamera();
+            }
+        });
+        closeCameraBtn.addEventListener('click', stopCamera);
+        cameraSelect.addEventListener('change', (e) => {
+            startCamera(e.target.value);
+        });
+
+        // --- 拖動攝影機視窗 ---
+        let isDragging = false;
+        let offsetX, offsetY;
+
+        cameraHeader.addEventListener('mousedown', (e) => {
+            if(e.target.id === 'camera-select') return;
+            isDragging = true;
+            offsetX = e.clientX - cameraContainer.offsetLeft;
+            offsetY = e.clientY - cameraContainer.offsetTop;
+            cameraContainer.style.cursor = 'grabbing';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                cameraContainer.style.left = `${e.clientX - offsetX}px`;
+                cameraContainer.style.top = `${e.clientY - offsetY}px`;
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+            cameraContainer.style.cursor = 'move';
+        });
+
+        // --- 音效邏輯 ---
+        const initAudio = async () => {
+            if (audioStarted) return;
+            await Tone.start();
+            audioStarted = true;
+            console.log("音訊已準備就緒");
+        };
+
+        toggleSfxBtn.addEventListener('click', () => {
+            initAudio();
+            sfxPanel.classList.toggle('hidden');
+            sfxMainIcon.classList.toggle('ph-speaker-high');
+            sfxMainIcon.classList.toggle('ph-speaker-slash');
+        });
+
+        const sfxSynth = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: "triangle" },
+            envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 },
+            volume: -10
+        }).toDestination();
+
+        function playClearSound() {
+            const now = Tone.now();
+            const notes = ["G4", "C5", "E5", "G5", "C6", "G6"];
+            notes.forEach((note, i) => {
+                sfxSynth.triggerAttackRelease(note, "16n", now + i * 0.08);
+            });
+        }
+
+        function playFailSound() {
+            const now = Tone.now();
+            const failSynth = new Tone.Synth({
+                oscillator: { type: 'square' },
+                envelope: { attack: 0.01, decay: 0.7, sustain: 0, release: 0.1 },
+                volume: -10
+            }).toDestination();
+
+            failSynth.triggerAttack("B4", now);
+            failSynth.frequency.rampTo("F4", 0.4, now + 0.1);
+            failSynth.triggerRelease(now + 0.5);
+        }
+
+        sfxButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                initAudio(); 
+                const sfx = button.dataset.sfx;
+                if (sfx === 'clear') {
+                    playClearSound();
+                } else if (sfx === 'fail') {
+                    playFailSound();
+                }
+            });
+        });
+
+        // --- 初始化 ---
+        switchTab('newLottery');
+        addPrizeRow();
+        drawWheel();
+        updateDiceDisplay();
+        initPoeBlocks();
+    });
+    </script>
+</body>
+</html>
