@@ -4,7 +4,7 @@
 
 包含轉盤、多獎抽選、隨機分隊、骰子／擲筊規則、直播特效、OCR 與球員查詢。
 
-`break-room-source.zip` 內含可編輯的 React / TypeScript 原始碼與鎖定依賴。解壓後執行 `npm ci` 及 `npm run build:pages`，網站輸出在 `docs/`。原始碼版本 f4703c3。
+`break-room-source.zip` 內含可編輯的 React / TypeScript 原始碼與鎖定依賴。解壓後執行 `npm ci` 及 `npm run build:pages`，網站輸出在 `docs/`。已加入三款原創 WAV 音效（汽笛、歪腰長號、開獎鼓聲）。音效以相對路徑載入，支援音量與立即停止；皆為程式合成，非實錄。
 
 - 名單、抽選紀錄保存在目前瀏覽器，不會跨裝置同步。
 - 直播外框與控制台使用同一瀏覽器，在 OBS 用「視窗擷取」。
